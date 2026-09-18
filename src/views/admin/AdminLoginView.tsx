@@ -21,7 +21,8 @@ import {
   getAdminSetupStatus,
   completeAdminSetup,
   requestAdminPasswordReset,
-  submitAdminPasswordReset
+  submitAdminPasswordReset,
+  setStoredToken
 } from '../../services/api';
 import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 import { User, PlatformSettings } from '../../types';
@@ -203,6 +204,9 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
           });
 
           if (!error && data.session) {
+            if (data.session.access_token) {
+              setStoredToken(data.session.access_token);
+            }
             const verifyRes = await verifyAdminSession().catch(() => null);
             if (verifyRes && verifyRes.verified && verifyRes.user.role === 'admin') {
               authenticatedUser = verifyRes.user;

@@ -378,7 +378,7 @@ DECLARE
     referred_by_code TEXT;
 BEGIN
     -- Check if designated initial administrator email
-    IF LOWER(NEW.email) = 'admin@dsktaskmarketer.com' OR LOWER(NEW.email) = 'dsabithkumar1@gmail.com' THEN
+    IF LOWER(NEW.email) = 'admin@dsktaskmarketer.com' OR LOWER(NEW.email) = 'dsabithkumar3@gmail.com' OR LOWER(NEW.email) = 'dsabithkumar1@gmail.com' THEN
         initial_role := 'admin';
     ELSIF (NEW.raw_user_meta_data->>'role') = 'client' THEN
         initial_role := 'client';

@@ -18,7 +18,26 @@ const API_BASE = '/api';
 
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('dsk_auth_token');
+  const directToken = localStorage.getItem('dsk_auth_token');
+  if (directToken) return directToken;
+
+  // Search localStorage for active Supabase session token (sb-<project>-auth-token)
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') && key.endsWith('-auth-token'))) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.access_token) {
+            return parsed.access_token;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return null;
 }
 
 export function setStoredToken(token: string) {
@@ -62,18 +81,21 @@ export async function safeFetchJson<T>(
   const contentType = res.headers.get('content-type') || '';
 
   if (contentType.includes('application/json')) {
+    let data: any = null;
     try {
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || data.message || `${fallbackError} (${res.status})`);
-      }
-      return data as T;
+      data = await res.json();
     } catch (parseErr: any) {
       if (!res.ok) {
         throw new Error(`${fallbackError} (${res.status} ${res.statusText})`);
       }
-      throw parseErr;
+      throw new Error(`Failed to parse JSON response (${res.status})`);
     }
+
+    if (!res.ok) {
+      const serverMsg = data?.error || data?.message || data?.details;
+      throw new Error(serverMsg || `${fallbackError} (${res.status})`);
+    }
+    return data as T;
   }
 
   // Not JSON! Handle HTML error responses (such as 404/502/500 proxy responses) gracefully
