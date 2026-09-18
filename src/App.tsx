@@ -107,8 +107,10 @@ import { AdminLoginView } from './views/admin/AdminLoginView';
 import { AdminAccessDeniedView } from './views/admin/AdminAccessDeniedView';
 import { AdminReferralsView } from './views/admin/AdminReferralsView';
 import { AdminLayout, AdminTab } from './components/admin/AdminLayout';
+import { useToast } from './context/ToastContext';
 
 export default function App() {
+  const { showToast } = useToast();
   // Navigation & Session State
   const [currentView, setCurrentView] = useState<string>('home');
   const [currentPath, setCurrentPath] = useState<string>(() => {
@@ -562,11 +564,6 @@ export default function App() {
 
   // Task & Submission Handlers
   const handleStartTask = async (task: Task) => {
-    if (!user) {
-      setDetailTask(null);
-      setCurrentView('login');
-      return;
-    }
     try {
       const info = await startTask(task.id);
       setStartTaskItem(task);
@@ -715,18 +712,42 @@ export default function App() {
 
   // Admin Task Handlers
   const handleCreateTask = async (taskData: any) => {
-    const created = await saveTask(taskData);
-    setTasks(prev => [created, ...prev]);
+    try {
+      const created = await saveTask(taskData);
+      setTasks(prev => [created, ...prev]);
+      showToast('Campaign task created successfully', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to create task', 'error');
+      throw err;
+    }
   };
 
-  const handleUpdateTask = async (taskData: any) => {
-    const updated = await saveTask(taskData);
-    setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+  const handleUpdateTask = async (idOrData: any, maybeData?: any) => {
+    try {
+      let taskToSave: any;
+      if (typeof idOrData === 'string') {
+        taskToSave = { ...(maybeData || {}), id: idOrData };
+      } else {
+        taskToSave = { ...idOrData };
+      }
+      const updated = await saveTask(taskToSave);
+      setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
+      showToast('Campaign task updated successfully', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update task', 'error');
+      throw err;
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    await toggleTaskActive(taskId, false);
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, active: false } : t));
+    try {
+      await toggleTaskActive(taskId, false);
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, active: false, isActive: false } : t));
+      showToast('Task visibility deactivated', 'info');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to deactivate task', 'error');
+      throw err;
+    }
   };
 
   const handleSaveSettings = async (newSettings: PlatformSettings) => {
@@ -1264,15 +1285,30 @@ export default function App() {
       {startTaskItem && taskStartedInfo && (
         <TaskStartModal
           task={startTaskItem}
+          startData={taskStartedInfo}
           trackingId={taskStartedInfo.referenceId}
           onClose={() => {
             setStartTaskItem(null);
             setTaskStartedInfo(null);
           }}
+          onProceedToSubmit={(t) => {
+            const taskToSubmit = t || startTaskItem;
+            setStartTaskItem(null);
+            setTaskStartedInfo(null);
+            if (!user) {
+              setCurrentView('login');
+              return;
+            }
+            setSubmitTaskItem(taskToSubmit);
+          }}
           onSubmitProof={() => {
             const t = startTaskItem;
             setStartTaskItem(null);
             setTaskStartedInfo(null);
+            if (!user) {
+              setCurrentView('login');
+              return;
+            }
             setSubmitTaskItem(t);
           }}
         />

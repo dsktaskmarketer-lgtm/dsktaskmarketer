@@ -43,6 +43,53 @@ function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+/**
+ * Safe fetch wrapper that guarantees valid JSON parsing and human-readable error messages.
+ * Prevents "Unexpected token '<', "<!DOCTYPE "... is not valid JSON" if an endpoint returns HTML.
+ */
+export async function safeFetchJson<T>(
+  url: string,
+  options?: RequestInit,
+  fallbackError = 'Request failed'
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, options);
+  } catch (netErr: any) {
+    throw new Error(`Network error connecting to ${url}: ${netErr.message || 'Please check your connection.'}`);
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    try {
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `${fallbackError} (${res.status})`);
+      }
+      return data as T;
+    } catch (parseErr: any) {
+      if (!res.ok) {
+        throw new Error(`${fallbackError} (${res.status} ${res.statusText})`);
+      }
+      throw parseErr;
+    }
+  }
+
+  // Not JSON! Handle HTML error responses (such as 404/502/500 proxy responses) gracefully
+  const rawText = await res.text();
+  let detail = '';
+  if (rawText.includes('<html') || rawText.includes('<!DOCTYPE')) {
+    detail = `API returned HTML page (${res.status} ${res.statusText}). Check API route: ${url}`;
+  } else if (rawText.trim()) {
+    detail = rawText.slice(0, 150);
+  } else {
+    detail = `HTTP ${res.status} ${res.statusText}`;
+  }
+
+  throw new Error(`${fallbackError}: ${detail}`);
+}
+
 export async function fetchMe(token?: string) {
   const authToken = token || getStoredToken();
   const headers: Record<string, string> = {};
@@ -240,26 +287,31 @@ export async function fetchTasks(category?: string, search?: string, admin = fal
   if (category) params.append('category', category);
   if (search) params.append('search', search);
   if (admin) params.append('admin', 'true');
-  const res = await fetch(`${API_BASE}/tasks?${params.toString()}`, {
+  return safeFetchJson<Task[]>(`${API_BASE}/tasks?${params.toString()}`, {
     headers: getAuthHeaders()
-  });
-  return res.json() as Promise<Task[]>;
+  }, 'Failed to load tasks');
 }
 
 export async function fetchCategories() {
-  const res = await fetch(`${API_BASE}/categories`);
-  return res.json() as Promise<TaskCategory[]>;
+  return safeFetchJson<TaskCategory[]>(`${API_BASE}/categories`, {}, 'Failed to load categories');
 }
 
 export async function startTask(taskId: string) {
-  const res = await fetch(`${API_BASE}/task-starts`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ taskId }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to start task');
-  return data as { referenceId: string; affiliateUrl: string; instructions: string };
+  return safeFetchJson<{ 
+    success: boolean;
+    referenceId: string; 
+    affiliateUrl: string; 
+    trackingUrl?: string;
+    instructions: string 
+  }>(
+    `${API_BASE}/task-starts`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ taskId }),
+    },
+    'Failed to start task'
+  );
 }
 
 // ===================== SUBMISSIONS =====================
@@ -489,26 +541,48 @@ export async function toggleUserStatus(userId: string, status?: string) {
   return res.json();
 }
 
-export async function saveTask(task: Partial<Task>) {
-  const method = task.id ? 'PUT' : 'POST';
-  const url = task.id ? `${API_BASE}/tasks/${task.id}` : `${API_BASE}/tasks`;
-  const res = await fetch(url, {
-    method,
-    headers: getAuthHeaders(),
-    body: JSON.stringify(task),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to save task');
-  return data as Task;
+export async function saveTask(taskOrId: Partial<Task> | string, maybeData?: Partial<Task>) {
+  let taskData: Partial<Task>;
+  let taskId: string | undefined;
+
+  if (typeof taskOrId === 'string') {
+    taskId = taskOrId;
+    taskData = { ...(maybeData || {}), id: taskId };
+  } else {
+    taskData = { ...taskOrId };
+    taskId = taskData.id;
+  }
+
+  const method = taskId ? 'PUT' : 'POST';
+  const url = taskId ? `${API_BASE}/tasks/${taskId}` : `${API_BASE}/tasks`;
+
+  return safeFetchJson<Task>(
+    url,
+    {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(taskData),
+    },
+    'Failed to save task'
+  );
 }
 
 export async function toggleTaskActive(taskId: string, active?: boolean) {
-  const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ active }),
-  });
-  return res.json();
+  return safeFetchJson<{ success: boolean; active: boolean; isActive?: boolean }>(
+    `${API_BASE}/tasks/${taskId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ active }),
+    },
+    'Failed to update task status'
+  );
 }
 
 // ===================== PLATFORM SETTINGS =====================

@@ -636,6 +636,26 @@ async function startServer() {
     res.json(campaign);
   });
 
+  // Helper to validate and normalize destination URLs
+  function normalizeDestinationUrl(rawUrl?: string | null): { valid: boolean; url: string; error?: string } {
+    if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim()) {
+      return { valid: false, url: '', error: 'Affiliate destination URL is not configured or is empty.' };
+    }
+    let trimmed = rawUrl.trim();
+    if (!/^https?:\/\//i.test(trimmed)) {
+      trimmed = `https://${trimmed}`;
+    }
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { valid: false, url: '', error: 'Only http:// and https:// URLs are supported.' };
+      }
+      return { valid: true, url: parsed.toString() };
+    } catch {
+      return { valid: false, url: '', error: 'Invalid web address URL format.' };
+    }
+  }
+
   // ===================== 3. TASKS & CATEGORIES =====================
   app.get('/api/categories', (req, res) => {
     res.json(db.categories.filter(c => c.active));
@@ -646,7 +666,7 @@ async function startServer() {
     let list = [...db.tasks];
 
     if (admin !== 'true') {
-      list = list.filter(t => t.active);
+      list = list.filter(t => t.active !== false && t.isActive !== false);
     }
 
     if (category && category !== 'all') {
@@ -676,29 +696,36 @@ async function startServer() {
     const admin = requireAdmin(req, res);
     if (!admin) return;
 
+    const isActive = req.body.isActive !== undefined ? Boolean(req.body.isActive) : 
+                     (req.body.active !== undefined ? Boolean(req.body.active) : true);
+
+    const urlCheck = normalizeDestinationUrl(req.body.affiliateUrl);
+    const validUrl = urlCheck.valid ? urlCheck.url : (req.body.affiliateUrl || "https://dsktaskmarketer.com");
+
     const newTask: Task = {
-      id: `tsk_${Date.now()}`,
+      id: req.body.id || `tsk_${Date.now()}`,
       title: req.body.title || "Financial Campaign Task",
       categoryId: req.body.categoryId || "cat_cards",
       partnerName: req.body.partnerName || "Partner",
       description: req.body.description || "",
       rewardAmount: Number(req.body.rewardAmount) || 100,
       currency: "INR",
-      affiliateUrl: req.body.affiliateUrl || "https://dsktaskmarketer.com",
+      affiliateUrl: validUrl,
       eligibility: req.body.eligibility || "Age 21+, Indian resident",
-      steps: req.body.steps || [
+      steps: Array.isArray(req.body.steps) && req.body.steps.length > 0 ? req.body.steps : [
         "Review eligibility criteria.",
         "Click Start Task to open partner portal.",
         "Complete online action.",
         "Submit required proof."
       ],
-      proofRequirements: req.body.proofRequirements || [
+      proofRequirements: Array.isArray(req.body.proofRequirements) && req.body.proofRequirements.length > 0 ? req.body.proofRequirements : [
         "Application reference ID",
         "Confirmation screenshot"
       ],
       terms: req.body.terms || "Reward is subject to partner audit verification.",
       affiliateDisclosure: req.body.affiliateDisclosure || "DSK TaskMarketer is compensated by affiliate partners upon qualifying actions.",
-      active: req.body.active !== undefined ? req.body.active : true,
+      active: isActive,
+      isActive: isActive,
       displayOrder: db.tasks.length + 1,
       startsCount: 0,
       completionsCount: 0,
@@ -706,6 +733,8 @@ async function startServer() {
     };
 
     db.tasks.push(newTask);
+    db.persistTasks();
+    console.log(`[Tasks] Created new task ${newTask.id} (${newTask.title}) with affiliateUrl: ${newTask.affiliateUrl}`);
     res.status(201).json(newTask);
   });
 
@@ -713,16 +742,54 @@ async function startServer() {
     const admin = requireAdmin(req, res);
     if (!admin) return;
 
-    const taskIndex = db.tasks.findIndex(t => t.id === req.params.id);
-    if (taskIndex === -1) return res.status(404).json({ error: "Task not found" });
+    const taskId = req.params.id;
+    let taskIndex = db.tasks.findIndex(t => t.id === taskId);
 
-    db.tasks[taskIndex] = {
-      ...db.tasks[taskIndex],
-      ...req.body,
-      id: db.tasks[taskIndex].id
+    const isActive = req.body.isActive !== undefined ? Boolean(req.body.isActive) : 
+                     (req.body.active !== undefined ? Boolean(req.body.active) : true);
+
+    const existingTask = taskIndex !== -1 ? db.tasks[taskIndex] : null;
+
+    let targetAffiliateUrl = req.body.affiliateUrl !== undefined ? req.body.affiliateUrl : (existingTask?.affiliateUrl || "");
+    const urlCheck = normalizeDestinationUrl(targetAffiliateUrl);
+    if (urlCheck.valid) {
+      targetAffiliateUrl = urlCheck.url;
+    }
+
+    const updatedTask: Task = {
+      id: taskId,
+      title: req.body.title || existingTask?.title || "Financial Campaign Task",
+      categoryId: req.body.categoryId || existingTask?.categoryId || "cat_cards",
+      partnerName: req.body.partnerName || existingTask?.partnerName || "Partner",
+      description: req.body.description !== undefined ? req.body.description : (existingTask?.description || ""),
+      rewardAmount: Number(req.body.rewardAmount) || existingTask?.rewardAmount || 100,
+      currency: req.body.currency || existingTask?.currency || "INR",
+      affiliateUrl: targetAffiliateUrl,
+      eligibility: req.body.eligibility !== undefined ? req.body.eligibility : (existingTask?.eligibility || ""),
+      steps: Array.isArray(req.body.steps) ? req.body.steps : (existingTask?.steps || []),
+      proofRequirements: Array.isArray(req.body.proofRequirements) ? req.body.proofRequirements : (existingTask?.proofRequirements || []),
+      terms: req.body.terms !== undefined ? req.body.terms : (existingTask?.terms || ""),
+      affiliateDisclosure: req.body.affiliateDisclosure || existingTask?.affiliateDisclosure || "DSK TaskMarketer is compensated by affiliate partners upon qualifying actions.",
+      active: isActive,
+      isActive: isActive,
+      displayOrder: existingTask ? existingTask.displayOrder : db.tasks.length + 1,
+      startsCount: existingTask ? existingTask.startsCount : 0,
+      completionsCount: existingTask ? existingTask.completionsCount : 0,
+      createdAt: existingTask ? existingTask.createdAt : new Date().toISOString(),
+      ...(req.body.campaignId ? { campaignId: req.body.campaignId } : (existingTask?.campaignId ? { campaignId: existingTask.campaignId } : {})),
+      ...(req.body.isDemo !== undefined ? { isDemo: req.body.isDemo } : (existingTask?.isDemo !== undefined ? { isDemo: existingTask.isDemo } : {}))
     };
 
-    res.json(db.tasks[taskIndex]);
+    if (taskIndex === -1) {
+      db.tasks.push(updatedTask);
+      console.log(`[Tasks] Upserted task ${taskId}`);
+    } else {
+      db.tasks[taskIndex] = updatedTask;
+      console.log(`[Tasks] Updated task ${taskId} (${updatedTask.title}), affiliateUrl: ${updatedTask.affiliateUrl}`);
+    }
+
+    db.persistTasks();
+    res.json(updatedTask);
   });
 
   app.delete('/api/tasks/:id', (req, res) => {
@@ -732,37 +799,192 @@ async function startServer() {
     const task = db.tasks.find(t => t.id === req.params.id);
     if (!task) return res.status(404).json({ error: "Task not found" });
 
-    task.active = !task.active;
-    res.json({ success: true, active: task.active });
+    const newActiveState = req.body.active !== undefined ? Boolean(req.body.active) : !task.active;
+    task.active = newActiveState;
+    task.isActive = newActiveState;
+    db.persistTasks();
+    res.json({ success: true, active: task.active, isActive: task.isActive });
+  });
+
+  // Public & Tracking Redirection Flow (User -> Start Task -> Tracking URL -> Affiliate Destination URL)
+  app.get('/track/:taskId', (req, res) => {
+    const { taskId } = req.params;
+    const task = db.tasks.find(t => t.id === taskId);
+    
+    if (!task) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Task Not Found | DSK TaskMarketer</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+            .card { background: white; max-width: 480px; width: 100%; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); text-align: center; }
+            h1 { font-size: 20px; margin-bottom: 8px; color: #0f172a; }
+            p { font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 24px; }
+            a { display: inline-block; background: #059669; color: white; text-decoration: none; font-weight: 600; font-size: 14px; padding: 12px 24px; border-radius: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>Task Offer Unavailable</h1>
+            <p>The requested task offer could not be found or has been completed. Please explore our active reward catalog.</p>
+            <a href="/">Browse Active Tasks</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    const check = normalizeDestinationUrl(task.affiliateUrl);
+    if (!check.valid) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Partner Link Issue | DSK TaskMarketer</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+            .card { background: white; max-width: 480px; width: 100%; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); text-align: center; }
+            h1 { font-size: 20px; margin-bottom: 8px; color: #b91c1c; }
+            p { font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 24px; }
+            a { display: inline-block; background: #0f172a; color: white; text-decoration: none; font-weight: 600; font-size: 14px; padding: 12px 24px; border-radius: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>Partner Destination Unconfigured</h1>
+            <p>The destination link for this task (${task.partnerName}) is currently being updated by the administrator. Please try again in a few moments.</p>
+            <a href="/task/${encodeURIComponent(task.id)}">Return to Task Offer</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Register tracking start
+    task.startsCount = (task.startsCount || 0) + 1;
+    const ref = (req.query.ref as string) || `DSK-TRK-${Math.floor(10000 + Math.random() * 90000)}`;
+    db.taskStarts.push({
+      taskId: task.id,
+      userId: (req.query.uid as string) || 'visitor',
+      referenceId: ref,
+      startedAt: new Date().toISOString()
+    });
+    db.persistTasks();
+
+    console.log(`[Tracking Redirect] Redirecting user to partner URL: ${check.url} (Task: ${task.id}, Ref: ${ref})`);
+
+    // HTTP 302 Redirect with robust fallback page for mobile webviews and sandboxed browsers
+    res.setHeader('Location', check.url);
+    res.status(302).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="refresh" content="0; url=${check.url}">
+        <title>Connecting to ${task.partnerName}...</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+          .card { background: white; max-width: 440px; width: 100%; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); text-align: center; }
+          .spinner { width: 36px; height: 36px; border: 3px solid #e2e8f0; border-top-color: #059669; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          h2 { font-size: 18px; margin: 0 0 8px; color: #0f172a; }
+          p { font-size: 13px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
+          a { display: inline-block; background: #059669; color: white; text-decoration: none; font-weight: 600; font-size: 13px; padding: 10px 20px; border-radius: 8px; }
+        </style>
+        <script>
+          window.location.replace("${check.url}");
+        </script>
+      </head>
+      <body>
+        <div class="card">
+          <div class="spinner"></div>
+          <h2>Connecting to ${task.partnerName}</h2>
+          <p>Redirecting to official partner application portal. If you are not redirected automatically within 3 seconds, click below.</p>
+          <a href="${check.url}" rel="noopener noreferrer">Continue to Partner Portal</a>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
+  // Dedicated API endpoint for tracking task launch
+  app.get('/api/tasks/:id/track', (req, res) => {
+    const task = db.tasks.find(t => t.id === req.params.id);
+    if (!task) return res.status(404).json({ error: "Task not found" });
+
+    const check = normalizeDestinationUrl(task.affiliateUrl);
+    if (!check.valid) {
+      return res.status(400).json({ error: check.error || "Invalid destination URL" });
+    }
+
+    task.startsCount = (task.startsCount || 0) + 1;
+    const ref = (req.query.ref as string) || `DSK-TRK-${Math.floor(10000 + Math.random() * 90000)}`;
+    db.taskStarts.push({
+      taskId: task.id,
+      userId: (req.query.uid as string) || 'visitor',
+      referenceId: ref,
+      startedAt: new Date().toISOString()
+    });
+    db.persistTasks();
+
+    res.json({
+      success: true,
+      taskId: task.id,
+      referenceId: ref,
+      affiliateUrl: check.url,
+      trackingUrl: `/track/${task.id}?ref=${ref}`
+    });
   });
 
   // ===================== 4. TASK STARTS & SUBMISSIONS =====================
   app.post('/api/task-starts', (req, res) => {
     const user = getAuthUser(req);
-    if (!user) return res.status(401).json({ error: "Authentication required to start task" });
-
     const { taskId } = req.body;
+    
+    if (!taskId) {
+      return res.status(400).json({ error: "Task ID is required" });
+    }
+
     const task = db.tasks.find(t => t.id === taskId);
     if (!task) return res.status(404).json({ error: "Task not found" });
 
-    task.startsCount += 1;
+    const urlCheck = normalizeDestinationUrl(task.affiliateUrl);
+    if (!urlCheck.valid) {
+      return res.status(400).json({ 
+        error: urlCheck.error || "The destination URL for this task is invalid or not configured." 
+      });
+    }
+
+    task.startsCount = (task.startsCount || 0) + 1;
     const referenceId = `DSK-TRK-${Math.floor(10000 + Math.random() * 90000)}`;
+    const userId = user ? user.id : 'guest';
 
     const startRecord = {
       id: `str_${Date.now()}`,
       taskId,
-      userId: user.id,
+      userId,
       referenceId,
       startedAt: new Date().toISOString(),
-      affiliateTrackingRef: `dsk_${user.id}_${Date.now()}`
+      affiliateTrackingRef: `dsk_${userId}_${Date.now()}`
     };
 
     db.taskStarts.push(startRecord);
+    db.persistTasks();
+
+    console.log(`[Task Started] Task ${taskId} started by ${userId}. Ref: ${referenceId}, URL: ${urlCheck.url}`);
 
     res.json({
       success: true,
       referenceId,
-      affiliateUrl: task.affiliateUrl,
+      affiliateUrl: urlCheck.url,
+      trackingUrl: `/track/${task.id}?ref=${referenceId}`,
       instructions: "Complete all partner steps carefully. Capture a screenshot of the final acknowledgment or confirmation page."
     });
   });
@@ -1531,6 +1753,14 @@ async function startServer() {
     };
 
     res.json({ success: true, settings: db.settings });
+  });
+
+  // Safe API route fallback: ensure ANY unhandled /api route returns JSON 404, NEVER HTML index.html
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      error: `API route not found: ${req.method} ${req.originalUrl}`,
+      status: 404
+    });
   });
 
   // Vite development middleware or static serve in production
