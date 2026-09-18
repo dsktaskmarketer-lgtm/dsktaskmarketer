@@ -7,7 +7,11 @@ import {
   supabaseServer, 
   verifySupabaseToken, 
   syncTaskToSupabase, 
-  deleteTaskFromSupabase 
+  saveTaskToSupabase,
+  loadTasksFromSupabase,
+  getTaskByIdFromSupabase,
+  deleteTaskFromSupabase,
+  recordTaskStartInSupabase
 } from './server/supabase.ts';
 import type { 
   Task, 
@@ -43,6 +47,18 @@ async function startServer() {
   const HOST = '0.0.0.0';
 
   app.use(express.json({ limit: '10mb' }));
+
+  // Preload tasks from Supabase database on server startup
+  if (supabaseServer) {
+    loadTasksFromSupabase({ admin: true })
+      .then(loaded => {
+        db.tasks = loaded;
+        console.log(`[Supabase DB] Initialized ${loaded.length} tasks from Supabase database`);
+      })
+      .catch(err => {
+        console.error('[Supabase DB] Startup task preload error:', err);
+      });
+  }
 
   // Asynchronous authentication middleware
   // Resolves token from Bearer header or x-user-id header
@@ -784,38 +800,66 @@ async function startServer() {
     res.json(db.categories.filter(c => c.active));
   });
 
-  app.get('/api/tasks', (req, res) => {
-    const { category, search, admin } = req.query;
-    let list = [...db.tasks];
+  app.get('/api/tasks', async (req, res) => {
+    try {
+      const { category, search, admin } = req.query;
+      const isAdminQuery = admin === 'true';
 
-    if (admin !== 'true') {
-      list = list.filter(t => t.active !== false && t.isActive !== false);
+      let list: Task[] = [];
+      if (supabaseServer) {
+        list = await loadTasksFromSupabase({
+          admin: isAdminQuery,
+          category: category && category !== 'all' ? String(category) : undefined,
+          search: typeof search === 'string' ? search : undefined,
+        });
+        if (isAdminQuery) {
+          db.tasks = list;
+        }
+      } else {
+        list = [...db.tasks];
+        if (!isAdminQuery) {
+          list = list.filter(t => t.active !== false && t.isActive !== false);
+        }
+        if (category && category !== 'all') {
+          list = list.filter(t => t.categoryId === category);
+        }
+        if (search && typeof search === 'string') {
+          const q = search.toLowerCase();
+          list = list.filter(t => 
+            t.title.toLowerCase().includes(q) || 
+            t.description.toLowerCase().includes(q) ||
+            t.partnerName.toLowerCase().includes(q)
+          );
+        }
+        list.sort((a, b) => a.displayOrder - b.displayOrder);
+      }
+
+      res.json(list);
+    } catch (err: any) {
+      console.error('[API /api/tasks] Error:', err);
+      res.status(500).json({ error: 'Failed to retrieve tasks from database' });
     }
-
-    if (category && category !== 'all') {
-      list = list.filter(t => t.categoryId === category);
-    }
-
-    if (search && typeof search === 'string') {
-      const q = search.toLowerCase();
-      list = list.filter(t => 
-        t.title.toLowerCase().includes(q) || 
-        t.description.toLowerCase().includes(q) ||
-        t.partnerName.toLowerCase().includes(q)
-      );
-    }
-
-    list.sort((a, b) => a.displayOrder - b.displayOrder);
-    res.json(list);
   });
 
-  app.get('/api/tasks/:id', (req, res) => {
-    const task = db.tasks.find(t => t.id === req.params.id);
-    if (!task) return res.status(404).json({ error: "Task not found" });
-    res.json(task);
+  app.get('/api/tasks/:id', async (req, res) => {
+    const taskId = req.params.id;
+    try {
+      if (supabaseServer) {
+        const dbTask = await getTaskByIdFromSupabase(taskId);
+        if (dbTask) {
+          return res.json(dbTask);
+        }
+      }
+      const task = db.tasks.find(t => t.id === taskId);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      res.json(task);
+    } catch (err: any) {
+      console.error(`[API /api/tasks/${taskId}] Error:`, err);
+      res.status(500).json({ error: "Failed to retrieve task" });
+    }
   });
 
-  app.post('/api/tasks', (req, res) => {
+  app.post('/api/tasks', async (req, res) => {
     const admin = requireAdmin(req, res);
     if (!admin) return;
 
@@ -846,7 +890,7 @@ async function startServer() {
         "Confirmation screenshot"
       ],
       terms: req.body.terms || "Reward is subject to partner audit verification.",
-      affiliateDisclosure: req.body.affiliateDisclosure || "DSK TaskMarketer is compensated by affiliate partners upon qualifying actions.",
+      affiliateDisclosure: req.body.affiliateDisclosure || "DSK TaskMarketer receives financial affiliate compensation from partner institution for qualified consumer actions.",
       active: isActive,
       isActive: isActive,
       displayOrder: db.tasks.length + 1,
@@ -855,31 +899,37 @@ async function startServer() {
       createdAt: new Date().toISOString()
     };
 
-    db.tasks.push(newTask);
-    db.persistTasks();
-    console.log(`[Tasks] Created new task ${newTask.id} (${newTask.title}) with affiliateUrl: ${newTask.affiliateUrl}`);
-
-    // Privileged server-side sync with Supabase tasks table
+    let resultTask = newTask;
     if (supabaseServer) {
-      syncTaskToSupabase(newTask).catch(err => {
-        console.warn('[Supabase Sync] Task creation sync warning:', err);
-      });
+      const saveRes = await saveTaskToSupabase(newTask);
+      if (!saveRes.success) {
+        console.error('[API /api/tasks] Error persisting to Supabase:', saveRes.error);
+        return res.status(500).json({ error: saveRes.error || "Failed to save task to Supabase database" });
+      }
+      if (saveRes.task) {
+        resultTask = saveRes.task;
+      }
     }
 
-    res.status(201).json(newTask);
+    db.tasks.push(resultTask);
+    db.persistTasks();
+    console.log(`[Tasks] Created and saved new task ${resultTask.id} (${resultTask.title}) in Supabase database`);
+
+    res.status(201).json(resultTask);
   });
 
-  app.put('/api/tasks/:id', (req, res) => {
+  app.put('/api/tasks/:id', async (req, res) => {
     const admin = requireAdmin(req, res);
     if (!admin) return;
 
     const taskId = req.params.id;
-    let taskIndex = db.tasks.findIndex(t => t.id === taskId);
+    let existingTask = db.tasks.find(t => t.id === taskId);
+    if (!existingTask && supabaseServer) {
+      existingTask = await getTaskByIdFromSupabase(taskId) || undefined;
+    }
 
     const isActive = req.body.isActive !== undefined ? Boolean(req.body.isActive) : 
                      (req.body.active !== undefined ? Boolean(req.body.active) : true);
-
-    const existingTask = taskIndex !== -1 ? db.tasks[taskIndex] : null;
 
     let targetAffiliateUrl = req.body.affiliateUrl !== undefined ? req.body.affiliateUrl : (existingTask?.affiliateUrl || "");
     const urlCheck = normalizeDestinationUrl(targetAffiliateUrl);
@@ -900,63 +950,71 @@ async function startServer() {
       steps: Array.isArray(req.body.steps) ? req.body.steps : (existingTask?.steps || []),
       proofRequirements: Array.isArray(req.body.proofRequirements) ? req.body.proofRequirements : (existingTask?.proofRequirements || []),
       terms: req.body.terms !== undefined ? req.body.terms : (existingTask?.terms || ""),
-      affiliateDisclosure: req.body.affiliateDisclosure || existingTask?.affiliateDisclosure || "DSK TaskMarketer is compensated by affiliate partners upon qualifying actions.",
+      affiliateDisclosure: req.body.affiliateDisclosure || existingTask?.affiliateDisclosure || "DSK TaskMarketer receives financial affiliate compensation from partner institution for qualified consumer actions.",
       active: isActive,
       isActive: isActive,
-      displayOrder: existingTask ? existingTask.displayOrder : db.tasks.length + 1,
+      displayOrder: existingTask ? existingTask.displayOrder : (db.tasks.length + 1),
       startsCount: existingTask ? existingTask.startsCount : 0,
       completionsCount: existingTask ? existingTask.completionsCount : 0,
       createdAt: existingTask ? existingTask.createdAt : new Date().toISOString(),
       ...(req.body.campaignId ? { campaignId: req.body.campaignId } : (existingTask?.campaignId ? { campaignId: existingTask.campaignId } : {})),
-      ...(req.body.isDemo !== undefined ? { isDemo: req.body.isDemo } : (existingTask?.isDemo !== undefined ? { isDemo: existingTask.isDemo } : {}))
     };
 
-    if (taskIndex === -1) {
-      db.tasks.push(updatedTask);
-      console.log(`[Tasks] Upserted task ${taskId}`);
-    } else {
-      db.tasks[taskIndex] = updatedTask;
-      console.log(`[Tasks] Updated task ${taskId} (${updatedTask.title}), affiliateUrl: ${updatedTask.affiliateUrl}`);
+    let resultTask = updatedTask;
+    if (supabaseServer) {
+      const saveRes = await saveTaskToSupabase(updatedTask);
+      if (!saveRes.success) {
+        console.error('[API /api/tasks/:id] Error saving to Supabase:', saveRes.error);
+        return res.status(500).json({ error: saveRes.error || "Failed to update task in Supabase database" });
+      }
+      if (saveRes.task) {
+        resultTask = saveRes.task;
+      }
     }
 
+    const taskIndex = db.tasks.findIndex(t => t.id === taskId);
+    if (taskIndex === -1) {
+      db.tasks.push(resultTask);
+    } else {
+      db.tasks[taskIndex] = resultTask;
+    }
     db.persistTasks();
 
-    // Privileged server-side sync with Supabase tasks table
-    if (supabaseServer) {
-      syncTaskToSupabase(updatedTask).catch(err => {
-        console.warn('[Supabase Sync] Task update sync warning:', err);
-      });
-    }
-
-    res.json(updatedTask);
+    console.log(`[Tasks] Successfully saved task ${taskId} in Supabase database:`, resultTask.title);
+    res.json(resultTask);
   });
 
-  app.delete('/api/tasks/:id', (req, res) => {
+  app.delete('/api/tasks/:id', async (req, res) => {
     const admin = requireAdmin(req, res);
     if (!admin) return;
 
-    const task = db.tasks.find(t => t.id === req.params.id);
+    const taskId = req.params.id;
+    let task = db.tasks.find(t => t.id === taskId);
+    if (!task && supabaseServer) {
+      task = await getTaskByIdFromSupabase(taskId) || undefined;
+    }
     if (!task) return res.status(404).json({ error: "Task not found" });
 
     const newActiveState = req.body.active !== undefined ? Boolean(req.body.active) : !task.active;
     task.active = newActiveState;
     task.isActive = newActiveState;
-    db.persistTasks();
 
-    // Sync status change to Supabase
     if (supabaseServer) {
-      syncTaskToSupabase(task).catch(err => {
-        console.warn('[Supabase Sync] Task delete/status sync warning:', err);
-      });
+      await deleteTaskFromSupabase(taskId, true);
     }
 
+    db.persistTasks();
     res.json({ success: true, active: task.active, isActive: task.isActive });
   });
 
   // Public & Tracking Redirection Flow (User -> Start Task -> Tracking URL -> Affiliate Destination URL)
-  app.get('/track/:taskId', (req, res) => {
+  app.get('/track/:taskId', async (req, res) => {
     const { taskId } = req.params;
-    const task = db.tasks.find(t => t.id === taskId);
+    let task = db.tasks.find(t => t.id === taskId);
+    if (!task && supabaseServer) {
+      task = await getTaskByIdFromSupabase(taskId) || undefined;
+      if (task) db.tasks.push(task);
+    }
     
     if (!task) {
       return res.status(404).send(`
@@ -1016,13 +1074,20 @@ async function startServer() {
     // Register tracking start
     task.startsCount = (task.startsCount || 0) + 1;
     const ref = (req.query.ref as string) || `DSK-TRK-${Math.floor(10000 + Math.random() * 90000)}`;
+    const userId = (req.query.uid as string) || 'visitor';
     db.taskStarts.push({
       taskId: task.id,
-      userId: (req.query.uid as string) || 'visitor',
+      userId,
       referenceId: ref,
       startedAt: new Date().toISOString()
     });
     db.persistTasks();
+
+    if (supabaseServer) {
+      recordTaskStartInSupabase(task.id, userId, ref).catch(err => {
+        console.warn('[Supabase DB] Note recording start:', err);
+      });
+    }
 
     console.log(`[Tracking Redirect] Redirecting user to partner URL: ${check.url} (Task: ${task.id}, Ref: ${ref})`);
 
@@ -1062,8 +1127,12 @@ async function startServer() {
   });
 
   // Dedicated API endpoint for tracking task launch
-  app.get('/api/tasks/:id/track', (req, res) => {
-    const task = db.tasks.find(t => t.id === req.params.id);
+  app.get('/api/tasks/:id/track', async (req, res) => {
+    let task = db.tasks.find(t => t.id === req.params.id);
+    if (!task && supabaseServer) {
+      task = await getTaskByIdFromSupabase(req.params.id) || undefined;
+      if (task) db.tasks.push(task);
+    }
     if (!task) return res.status(404).json({ error: "Task not found" });
 
     const check = normalizeDestinationUrl(task.affiliateUrl);
@@ -1073,13 +1142,20 @@ async function startServer() {
 
     task.startsCount = (task.startsCount || 0) + 1;
     const ref = (req.query.ref as string) || `DSK-TRK-${Math.floor(10000 + Math.random() * 90000)}`;
+    const userId = (req.query.uid as string) || 'visitor';
     db.taskStarts.push({
       taskId: task.id,
-      userId: (req.query.uid as string) || 'visitor',
+      userId,
       referenceId: ref,
       startedAt: new Date().toISOString()
     });
     db.persistTasks();
+
+    if (supabaseServer) {
+      recordTaskStartInSupabase(task.id, userId, ref).catch(err => {
+        console.warn('[Supabase DB] Note recording start:', err);
+      });
+    }
 
     res.json({
       success: true,
@@ -1091,7 +1167,7 @@ async function startServer() {
   });
 
   // ===================== 4. TASK STARTS & SUBMISSIONS =====================
-  app.post('/api/task-starts', (req, res) => {
+  app.post('/api/task-starts', async (req, res) => {
     const user = getAuthUser(req);
     const { taskId } = req.body;
     
@@ -1099,7 +1175,11 @@ async function startServer() {
       return res.status(400).json({ error: "Task ID is required" });
     }
 
-    const task = db.tasks.find(t => t.id === taskId);
+    let task = db.tasks.find(t => t.id === taskId);
+    if (!task && supabaseServer) {
+      task = await getTaskByIdFromSupabase(taskId) || undefined;
+      if (task) db.tasks.push(task);
+    }
     if (!task) return res.status(404).json({ error: "Task not found" });
 
     const urlCheck = normalizeDestinationUrl(task.affiliateUrl);
@@ -1124,6 +1204,12 @@ async function startServer() {
 
     db.taskStarts.push(startRecord);
     db.persistTasks();
+
+    if (supabaseServer) {
+      recordTaskStartInSupabase(taskId, user?.id, referenceId).catch(err => {
+        console.warn('[Supabase DB] Start record note:', err);
+      });
+    }
 
     console.log(`[Task Started] Task ${taskId} started by ${userId}. Ref: ${referenceId}, URL: ${urlCheck.url}`);
 

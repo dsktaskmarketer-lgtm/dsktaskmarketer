@@ -366,6 +366,17 @@ export class InMemoryDB {
   }
 
   public persistTasks() {
+    // In production with Supabase configured, tasks are stored in Supabase.
+    // Keep .data/tasks.json untouched on disk as requested.
+    const isProdOrSupabase = Boolean(
+      process.env.SUPABASE_URL ||
+      process.env.VITE_SUPABASE_URL ||
+      process.env.NODE_ENV === 'production'
+    );
+    if (isProdOrSupabase) {
+      return;
+    }
+
     try {
       const dataDir = path.dirname(this.tasksStoragePath);
       if (!fs.existsSync(dataDir)) {
@@ -378,6 +389,20 @@ export class InMemoryDB {
   }
 
   private initTasks() {
+    // In production or when Supabase is configured, do NOT load demo/sample tasks from .data/tasks.json.
+    // The server-side task loading flow loads real tasks from Supabase database instead.
+    const isProdOrSupabase = Boolean(
+      process.env.SUPABASE_URL ||
+      process.env.VITE_SUPABASE_URL ||
+      process.env.NODE_ENV === 'production'
+    );
+
+    if (isProdOrSupabase) {
+      console.log('[DB Persistence] Production Supabase mode: Bypassing demo tasks from .data/tasks.json.');
+      this.tasks = [];
+      return;
+    }
+
     try {
       if (fs.existsSync(this.tasksStoragePath)) {
         const raw = fs.readFileSync(this.tasksStoragePath, 'utf-8');
@@ -388,135 +413,15 @@ export class InMemoryDB {
             active: t.isActive !== undefined ? Boolean(t.isActive) : (t.active !== undefined ? Boolean(t.active) : true),
             isActive: t.isActive !== undefined ? Boolean(t.isActive) : (t.active !== undefined ? Boolean(t.active) : true),
           }));
-          console.log(`[DB Persistence] Successfully restored ${this.tasks.length} tasks from disk`);
+          console.log(`[DB Persistence] Restored ${this.tasks.length} local dev tasks from disk`);
           return;
         }
       }
     } catch (err) {
-      console.warn('[DB Persistence] Failed to restore tasks from disk, initializing defaults:', err);
+      console.warn('[DB Persistence] Local dev fallback note:', err);
     }
 
-    // Default Seed Tasks with Verified Partner Destination URLs
-    this.tasks = [
-      {
-        id: "tsk_cards_01",
-        title: "HDFC Bank Millennia Credit Card Application",
-        categoryId: "cat_cards",
-        partnerName: "HDFC Bank",
-        description: "Apply for HDFC Millennia Credit Card and earn 5% cashback on Amazon, Flipkart, Swiggy and ₹350 platform reward.",
-        rewardAmount: 350,
-        currency: "INR",
-        affiliateUrl: "https://www.hdfcbank.com/personal/pay/cards/credit-cards/millennia-cards",
-        eligibility: "Age 21-60, Salaried (₹35k/mo) or Self-employed (ITR > ₹6L)",
-        steps: [
-          "Click Start Task to open official HDFC Bank partner portal.",
-          "Fill mobile number, PAN, and address details.",
-          "Complete biometric KYC or video KYC.",
-          "Save the 14-digit Application Reference ID."
-        ],
-        proofRequirements: [
-          "Application Reference ID (e.g., HDC9823412)",
-          "Screenshot of the final confirmation screen showing application submission"
-        ],
-        terms: "Reward credited within 24-48 hours upon official affiliate reconciliation and validation.",
-        affiliateDisclosure: "DSK TaskMarketer receives financial affiliate compensation from partner institution for qualified consumer actions.",
-        active: true,
-        isActive: true,
-        displayOrder: 1,
-        startsCount: 0,
-        completionsCount: 0,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: "tsk_cards_02",
-        title: "SBI SimplyCLICK Credit Card Application",
-        categoryId: "cat_cards",
-        partnerName: "SBI Card",
-        description: "Get SBI SimplyCLICK card with ₹500 Amazon gift card welcome benefit plus ₹300 direct wallet credit.",
-        rewardAmount: 300,
-        currency: "INR",
-        affiliateUrl: "https://www.sbicard.com/en/personal/credit-cards/shopping/simplyclick-sbi-card.page",
-        eligibility: "Age 21-65, Indian citizen, valid PAN & Aadhaar",
-        steps: [
-          "Click Start Task to open SBI Card application.",
-          "Enter your mobile and PAN to verify eligibility.",
-          "Complete digital e-KYC and submit application.",
-          "Capture application number on acknowledgment screen."
-        ],
-        proofRequirements: [
-          "Application Number",
-          "Screenshot of application success screen"
-        ],
-        terms: "Subject to SBI Card credit appraisal guidelines.",
-        affiliateDisclosure: "DSK TaskMarketer is an authorized affiliate intermediary.",
-        active: true,
-        isActive: true,
-        displayOrder: 2,
-        startsCount: 0,
-        completionsCount: 0,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: "tsk_bank_01",
-        title: "Kotak 811 Zero Balance Digital Savings Account",
-        categoryId: "cat_banking",
-        partnerName: "Kotak Mahindra Bank",
-        description: "Open Kotak 811 instant zero-balance savings account in 5 minutes via Video KYC and earn ₹180 reward.",
-        rewardAmount: 180,
-        currency: "INR",
-        affiliateUrl: "https://www.kotak811.com/open-zero-balance-savings-account-online",
-        eligibility: "Age 18+, Aadhaar linked with mobile number, PAN card",
-        steps: [
-          "Click Start Task to visit Kotak 811 official portal.",
-          "Provide Mobile and Email ID.",
-          "Verify Aadhaar OTP and enter PAN details.",
-          "Complete quick 3-minute Video KYC."
-        ],
-        proofRequirements: [
-          "CRN or Account Reference Number",
-          "Welcome SMS or screen acknowledgment screenshot"
-        ],
-        terms: "Valid only for new Kotak Bank account openings.",
-        affiliateDisclosure: "DSK TaskMarketer receives affiliate commission upon account verification.",
-        active: true,
-        isActive: true,
-        displayOrder: 3,
-        startsCount: 0,
-        completionsCount: 0,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: "tsk_inv_01",
-        title: "Zerodha Kite Demat & Trading Account Opening",
-        categoryId: "cat_investing",
-        partnerName: "Zerodha",
-        description: "Open an online trading and investment account with Zerodha and earn ₹220 reward.",
-        rewardAmount: 220,
-        currency: "INR",
-        affiliateUrl: "https://zerodha.com/open-account",
-        eligibility: "Age 18+, Indian resident with valid Bank Account, PAN and Aadhaar",
-        steps: [
-          "Click Start Task to navigate to Zerodha account opening.",
-          "Sign up with Mobile number and email.",
-          "Complete DigiLocker verification and e-Sign.",
-          "Note down your 6-character Zerodha Client ID."
-        ],
-        proofRequirements: [
-          "Zerodha Client ID or Application ID",
-          "Screenshot of e-Sign confirmation or client ID assignment"
-        ],
-        terms: "Accounts subject to SEBI regulatory guidelines and verification.",
-        affiliateDisclosure: "DSK TaskMarketer is compensated by financial partners for qualified registrations.",
-        active: true,
-        isActive: true,
-        displayOrder: 4,
-        startsCount: 0,
-        completionsCount: 0,
-        createdAt: new Date().toISOString()
-      }
-    ];
-
-    this.persistTasks();
+    this.tasks = [];
   }
 }
 
