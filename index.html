@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DSK TaskMarketer - Digital Success Key | Complete Tasks • Earn Rewards</title>
+    <meta name="description" content="Digital Success Key - Financial affiliate marketing and task-based rewards platform. Discover eligible financial tasks, complete verified actions through approved partner links, and receive rewards." />
+    <meta property="og:title" content="DSK TaskMarketer - Digital Success Key | Complete Tasks • Earn Rewards" />
+    <meta property="og:description" content="Digital Success Key - Financial affiliate marketing and task-based rewards platform. Discover eligible financial tasks, complete verified actions through approved partner links, and receive rewards." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          var mode = localStorage.getItem('dsk_theme_mode') || 'system';
+          var isDark = mode === 'dark' || (mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.style.colorScheme = 'light';
+          }
+          document.documentElement.lang = 'en';
+        } catch(e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
