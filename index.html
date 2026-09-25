@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DSK TaskMarketer - Digital Success Key | Complete Tasks • Earn Rewards</title>
+    <meta name="description" content="Digital Success Key - Financial affiliate marketing and task-based rewards platform. Discover eligible financial tasks, complete verified actions through approved partner links, and receive rewards." />
+    <meta property="og:title" content="DSK TaskMarketer - Digital Success Key | Complete Tasks • Earn Rewards" />
+    <meta property="og:description" content="Digital Success Key - Financial affiliate marketing and task-based rewards platform. Discover eligible financial tasks, complete verified actions through approved partner links, and receive rewards." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        // Prevent WebSocket connection failures or closes from causing unhandled promise rejections
+        window.addEventListener('unhandledrejection', function(event) {
+          try {
+            var reason = event && event.reason;
+            var msg = '';
+            if (typeof reason === 'string') {
+              msg = reason;
+            } else if (reason && typeof reason === 'object') {
+              msg = (reason.message || '') + ' ' + (reason.description || '') + ' ' + (reason.name || '') + ' ' + String(reason);
+            }
+            if (
+              /websocket|web\s*socket|closed\s+without\s+opened/i.test(msg) ||
+              (reason && reason.name === 'WebSocketError')
+            ) {
+              event.preventDefault();
+              if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+              }
+              return false;
+            }
+          } catch (e) {}
+        });
+
+        // Catch window-level WebSocket error events
+        window.addEventListener('error', function(event) {
+          try {
+            var msg = (event && (event.message || '')) || '';
+            if (/websocket|web\s*socket|closed\s+without\s+opened/i.test(msg)) {
+              event.preventDefault();
+              return false;
+            }
+          } catch (e) {}
+        }, true);
+
+        // Filter out benign Vite WebSocket connection notice in preview environments
+        var origConsoleError = console.error;
+        console.error = function() {
+          try {
+            var arg0 = arguments[0];
+            var text = typeof arg0 === 'string' ? arg0 : (arg0 && (arg0.message || String(arg0))) || '';
+            if (
+              text.includes('failed to connect to websocket') ||
+              text.includes('WebSocket closed without opened') ||
+              text.includes('[vite] failed to connect')
+            ) {
+              return;
+            }
+          } catch (e) {}
+          return origConsoleError.apply(console, arguments);
+        };
+
+        try {
+          var mode = localStorage.getItem('dsk_theme_mode') || 'system';
+          var isDark = mode === 'dark' || (mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.style.colorScheme = 'light';
+          }
+          document.documentElement.lang = 'en';
+        } catch(e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

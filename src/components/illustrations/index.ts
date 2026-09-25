@@ -1,0 +1,16 @@
+export { HeroCharacterIllustration } from './HeroCharacterIllustration';
+export { DskDuoHeroIllustration } from './DskDuoHeroIllustration';
+export { DskDuoBannerIllustration } from './DskDuoBannerIllustration';
+export { DskDuoGiftIllustration } from './DskDuoGiftIllustration';
+export { ReferralFriendsIllustration } from './ReferralFriendsIllustration';
+export { TaskCompleteIllustration } from './TaskCompleteIllustration';
+export { WalletRewardIllustration } from './WalletRewardIllustration';
+export { SecurityTrustIllustration } from './SecurityTrustIllustration';
+export { EmptyStateIllustration } from './EmptyStateIllustration';
+export { TasksSectionIllustration } from './TasksSectionIllustration';
+export { IncentivesSectionIllustration } from './IncentivesSectionIllustration';
+export { ReferralSectionIllustration } from './ReferralSectionIllustration';
+export { WalletSectionIllustration } from './WalletSectionIllustration';
+export { CommunitySectionIllustration } from './CommunitySectionIllustration';
+export { ProfileSectionIllustration } from './ProfileSectionIllustration';
+export { AuthSectionIllustration } from './AuthSectionIllustration';

@@ -1,0 +1,8 @@
+{
+  "name": "DSK TaskMarketer",
+  "description": "Digital Success Key - Financial affiliate marketing and task-based rewards platform. Discover eligible financial tasks, complete verified actions through approved partner links, and receive rewards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

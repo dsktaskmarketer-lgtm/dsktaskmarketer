@@ -1,0 +1,24 @@
+[
+  {
+    "id": "rwd_sub_demo_001",
+    "userId": "usr_member_101",
+    "submissionId": "sub_demo_001",
+    "type": "task_reward",
+    "amount": 500,
+    "status": "credited",
+    "referenceId": "DSK-HDFC-9842",
+    "description": "Task Reward: HDFC Bank Millennia Credit Card - Premium Cashback",
+    "createdAt": "2026-09-20T11:17:03.097Z"
+  },
+  {
+    "id": "rwd_sub_demo_002",
+    "userId": "usr_member_102",
+    "submissionId": "sub_demo_002",
+    "type": "task_reward",
+    "amount": 180,
+    "status": "pending",
+    "referenceId": "DSK-KTK-4721",
+    "description": "Task Reward: Kotak 811 Zero Balance Digital Savings Account",
+    "createdAt": "2026-09-20T19:17:03.097Z"
+  }
+]

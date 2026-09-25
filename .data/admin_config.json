@@ -1,0 +1,8 @@
+{
+  "adminSetupCompleted": true,
+  "adminId": "admin_root_001",
+  "adminEmail": "dsktaskmarketer@gmail.com",
+  "passwordHash": "47a5d4c54c560450bb2fd4ffe8e4f42245a724cdcadfbddb9e58731e18ab7672ee1e1b6812edbf4faaf6bfb6cd560090f763aa851c440df65fb706759e0eaeac",
+  "salt": "8fd25f555390be0ee889f18bf9bd97a2",
+  "completedAt": "2026-09-20T07:30:04.277Z"
+}
