@@ -1084,7 +1084,9 @@ async function startServer() {
       return res.status(400).json({ error: "Please enter a valid 10-digit mobile number." });
     }
 
+    const _tSend = Date.now();
     const { emailUsed, mobileUsed } = await checkRegistrationDuplicateStatus(cleanEmail, rawMobile);
+    console.log(`[Timing] send-otp duplicate check: ${Date.now() - _tSend}ms`);
     if (emailUsed && mobileUsed) {
       return res.status(400).json({
         error: "This email is already used. This mobile number is already used.",
@@ -1121,7 +1123,9 @@ async function startServer() {
     const assignedRole: 'user' | 'client' = role === 'client' ? 'client' : 'user';
 
     // Dispatch REAL Email OTP via Brevo -> Mailjet -> Resend
+    const _tMail = Date.now();
     const emailResult = await emailService.sendRegistrationOtp(cleanEmail, otp, cleanedName);
+    console.log(`[Timing] send-otp email dispatch: ${Date.now() - _tMail}ms (total ${Date.now() - _tSend}ms)`);
     if (!emailResult.success) {
       console.error(`[Register OTP] Failed to send email to ${cleanEmail}:`, emailResult.error);
       return res.status(500).json({
@@ -1222,6 +1226,7 @@ async function startServer() {
       saveUserToSupabase(newUser, pending.passwordRaw).catch(() => {});
     }).catch(() => {});
 
+    const _tVerify = Date.now();
     if (supabaseServer) {
       try {
         await supabaseServer.auth.admin.createUser({
@@ -1236,6 +1241,7 @@ async function startServer() {
           }
         });
       } catch {}
+      console.log(`[Timing] verify-otp supabase auth createUser: ${Date.now() - _tVerify}ms`);
     }
 
     // Handle referral if applicable
