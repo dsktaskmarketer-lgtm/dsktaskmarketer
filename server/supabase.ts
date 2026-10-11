@@ -561,51 +561,45 @@ export async function checkDuplicatesInSupabase(
   const last10 = digits.slice(-10);
 
   try {
-    // 1. Check email in profiles table
-    if (cleanEmail) {
-      const { data: profilesWithEmail, error: pEmailErr } = await clientInstance
-        .from('profiles')
-        .select('id, email')
-        .ilike('email', cleanEmail)
-        .limit(1);
+    // PERFORMANCE: run all 3 lookups in parallel (was 3 sequential round-trips)
+    const t0 = Date.now();
+    const empty: any = Promise.resolve({ data: null, error: null });
 
-      if (!pEmailErr && profilesWithEmail && profilesWithEmail.length > 0) {
-        emailUsed = true;
-      }
+    const emailProfileQ: any = cleanEmail
+      ? (clientInstance as any).from('profiles').select('id, email').ilike('email', cleanEmail).limit(1)
+      : empty;
+
+    const authListQ: any = cleanEmail && clientInstance.auth?.admin
+      ? Promise.resolve(clientInstance.auth.admin.listUsers()).catch(() => ({ data: null, error: true }))
+      : empty;
+
+    const mobileQ: any = last10 && last10.length === 10
+      ? (clientInstance as any).from('profiles').select('id, mobile').not('mobile', 'is', null).limit(500)
+      : empty;
+
+    const [emailRes, authRes, mobileRes]: any[] = await Promise.all([emailProfileQ, authListQ, mobileQ]);
+
+    if (!emailRes?.error && Array.isArray(emailRes?.data) && emailRes.data.length > 0) {
+      emailUsed = true;
     }
 
-    // 2. Check email in auth.users if service role is available
-    if (!emailUsed && cleanEmail && clientInstance.auth?.admin) {
-      try {
-        const { data: authList, error: aErr } = await clientInstance.auth.admin.listUsers();
-        if (!aErr && authList?.users) {
-          const match = authList.users.some(
-            (u: any) => (u.email || '').trim().toLowerCase() === cleanEmail
-          );
-          if (match) emailUsed = true;
-        }
-      } catch (authErr) {
-        // Ignore if restricted
-      }
+    if (!emailUsed && !authRes?.error && authRes?.data?.users) {
+      const match = authRes.data.users.some(
+        (u: any) => (u.email || '').trim().toLowerCase() === cleanEmail
+      );
+      if (match) emailUsed = true;
     }
 
-    // 3. Check mobile in profiles table
-    if (last10 && last10.length === 10) {
-      const { data: profilesWithMobile, error: pMobErr } = await clientInstance
-        .from('profiles')
-        .select('id, mobile')
-        .not('mobile', 'is', null)
-        .limit(500);
-
-      if (!pMobErr && Array.isArray(profilesWithMobile)) {
-        const match = profilesWithMobile.some((p: any) => {
-          if (!p.mobile) return false;
-          const pDigits = String(p.mobile).replace(/\D/g, '').slice(-10);
-          return pDigits.length === 10 && pDigits === last10;
-        });
-        if (match) mobileUsed = true;
-      }
+    if (!mobileRes?.error && Array.isArray(mobileRes?.data)) {
+      const match = mobileRes.data.some((p: any) => {
+        if (!p.mobile) return false;
+        const pDigits = String(p.mobile).replace(/\D/g, '').slice(-10);
+        return pDigits.length === 10 && pDigits === last10;
+      });
+      if (match) mobileUsed = true;
     }
+
+    console.log(`[Timing] checkDuplicatesInSupabase took ${Date.now() - t0}ms`);
   } catch (err: any) {
     console.warn('[Supabase Duplicate Check] Error:', err?.message || err);
   }
