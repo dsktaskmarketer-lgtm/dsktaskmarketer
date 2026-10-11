@@ -182,6 +182,31 @@ export const AuthViews: React.FC<AuthViewsProps> = ({
     }
   };
 
+  const showAuthError = (err: any) => {
+    console.error("Auth submit error:", err);
+    const errMsg = err?.message || "Authentication error occurred.";
+    const fErrors = err?.fieldErrors;
+    if (fErrors) {
+      if (fErrors.email) setEmailFieldError(fErrors.email);
+      if (fErrors.mobile) setMobileFieldError(fErrors.mobile);
+      setError(errMsg);
+    } else if (errMsg.includes("This email is already used.") && errMsg.includes("This mobile number is already used.")) {
+      setEmailFieldError("This email is already used.");
+      setMobileFieldError("This mobile number is already used.");
+      setError("This email is already used. This mobile number is already used.");
+    } else if (errMsg.includes("This email is already used.")) {
+      setEmailFieldError("This email is already used.");
+      setMobileFieldError(null);
+      setError("This email is already used.");
+    } else if (errMsg.includes("This mobile number is already used.")) {
+      setMobileFieldError("This mobile number is already used.");
+      setEmailFieldError(null);
+      setError("This mobile number is already used.");
+    } else {
+      setError(errMsg);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -240,31 +265,15 @@ export const AuthViews: React.FC<AuthViewsProps> = ({
             return;
           }
 
-          // Pre-check duplicates
-          try {
-            const dupRes = await checkRegistrationDuplicates({ email: cleanEmail, mobile: cleanPhone });
-            if (dupRes.emailUsed || dupRes.mobileUsed) {
-              if (dupRes.emailUsed && dupRes.mobileUsed) {
-                setEmailFieldError("This email is already used.");
-                setMobileFieldError("This mobile number is already used.");
-                setError("This email is already used. This mobile number is already used.");
-              } else if (dupRes.emailUsed) {
-                setEmailFieldError("This email is already used.");
-                setMobileFieldError(null);
-                setError("This email is already used.");
-              } else {
-                setMobileFieldError("This mobile number is already used.");
-                setEmailFieldError(null);
-                setError("This mobile number is already used.");
-              }
-              return;
-            }
-          } catch (dupCheckErr) {
-            console.warn('[Registration Duplicate Pre-Check] Notice:', dupCheckErr);
-          }
+          // INSTANT UX: show the OTP screen right away. The server validates duplicates
+          // and sends the email in the background; if anything fails we roll back and show the error.
+          // (The separate duplicate pre-check was removed: send-otp already checks duplicates,
+          //  so it was doing the same slow Supabase lookup twice.)
+          setRegOtpSent(true);
+          setRegResendCooldown(45);
+          setSuccess("OTP is being sent to your email. Please check your Inbox or Spam folder.");
 
-          // Dispatch REAL Email OTP
-          const sendRes = await sendRegistrationOtp({
+          sendRegistrationOtp({
             name: cleanName,
             email: cleanEmail,
             mobile: cleanPhone,
@@ -272,11 +281,12 @@ export const AuthViews: React.FC<AuthViewsProps> = ({
             confirmPassword: confirmPassword,
             role: accountType,
             referralCode: referralCode.trim() || undefined,
+          }).catch((sendErr: any) => {
+            setRegOtpSent(false);
+            setRegResendCooldown(0);
+            setSuccess(null);
+            showAuthError(sendErr);
           });
-
-          setRegOtpSent(true);
-          setRegResendCooldown(45);
-          setSuccess("OTP sent to your Gmail. Please check your Inbox or Spam folder.");
         } else {
           // Step 2: Verify Registration OTP and Activate Account
           const cleanOtp = regOtpCode.trim();
@@ -359,28 +369,7 @@ export const AuthViews: React.FC<AuthViewsProps> = ({
         }
       }
     } catch (err: any) {
-      console.error("Auth submit error:", err);
-      const errMsg = err?.message || "Authentication error occurred.";
-      const fErrors = err?.fieldErrors;
-      if (fErrors) {
-        if (fErrors.email) setEmailFieldError(fErrors.email);
-        if (fErrors.mobile) setMobileFieldError(fErrors.mobile);
-        setError(errMsg);
-      } else if (errMsg.includes("This email is already used.") && errMsg.includes("This mobile number is already used.")) {
-        setEmailFieldError("This email is already used.");
-        setMobileFieldError("This mobile number is already used.");
-        setError("This email is already used. This mobile number is already used.");
-      } else if (errMsg.includes("This email is already used.")) {
-        setEmailFieldError("This email is already used.");
-        setMobileFieldError(null);
-        setError("This email is already used.");
-      } else if (errMsg.includes("This mobile number is already used.")) {
-        setMobileFieldError("This mobile number is already used.");
-        setEmailFieldError(null);
-        setError("This mobile number is already used.");
-      } else {
-        setError(errMsg);
-      }
+      showAuthError(err);
     } finally {
       setLoading(false);
     }
