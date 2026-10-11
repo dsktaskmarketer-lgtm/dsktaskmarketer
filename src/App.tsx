@@ -569,7 +569,12 @@ export default function App() {
     const data = await loginUser(email, pass);
     setUser(data.user);
     setWallet(data.wallet);
-    await loadUserData(data.user);
+    // PERFORMANCE: don't block the redirect on 8 API calls; dashboard fills in as data arrives
+    if (data.user.role === 'admin') {
+      await loadUserData(data.user);
+    } else {
+      void loadUserData(data.user);
+    }
     if (data.user.role === 'admin') {
       if (data.user.mustChangeCredentials) {
         if (typeof window !== 'undefined') {
@@ -602,7 +607,7 @@ export default function App() {
     });
     setUser(data.user);
     setWallet(data.wallet);
-    await loadUserData(data.user);
+    void loadUserData(data.user); // PERFORMANCE: redirect immediately, load data in background
     if (data.user.role === 'client') {
       setCurrentView('client-dashboard');
     } else {
@@ -1386,7 +1391,12 @@ export default function App() {
               if (newWallet) {
                 setWallet(newWallet);
               }
-              await loadUserData(newUser);
+              // PERFORMANCE: redirect immediately; dashboard data loads in background
+              if (newUser.role === 'admin') {
+                await loadUserData(newUser);
+              } else {
+                void loadUserData(newUser);
+              }
               if (newUser.role === 'admin') {
                 setCurrentView('admin-dashboard');
               } else if (newUser.role === 'client') {
